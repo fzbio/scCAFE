@@ -5,6 +5,140 @@ import bioframe as bf
 import numpy as np
 
 
+def read_peakachu_output_as_df(peakachu_output_paths, remove_chr):
+    dfs = []
+    for p in peakachu_output_paths:
+        peakachu_output_df = pd.read_csv(
+            p, sep='\t',
+            header=None,
+            index_col=False,
+            usecols=[0, 1, 2, 3, 4, 5, 6],
+            names=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2', 'proba']
+        )
+
+        df1 = peakachu_output_df[peakachu_output_df['y1'] > peakachu_output_df['x1']]
+        df2 = peakachu_output_df[peakachu_output_df['y1'] < peakachu_output_df['x1']]
+        df2 = df2.rename(columns={'x1': 'y1', 'x2': 'y2', 'y1': 'x1', 'y2': 'x2'})
+        peakachu_output_df = pd.concat([df1, df2])
+        peakachu_output_df = peakachu_output_df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+        peakachu_output_df = peakachu_output_df.reset_index(drop=True)
+
+        if remove_chr:
+            peakachu_output_df['chrom1'] = peakachu_output_df['chrom1'].str.replace('chr', '')
+            peakachu_output_df['chrom2'] = peakachu_output_df['chrom2'].str.replace('chr', '')
+        dfs.append(peakachu_output_df)
+    return pd.concat(dfs).reset_index(drop=True)
+
+
+def read_cooltools_output_as_df(cooltools_output_path):
+    df = pd.read_csv(
+        cooltools_output_path, sep='\t',
+        header=0,
+        index_col=False,
+        usecols=[0, 1, 2, 3, 4, 5],
+        names=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2']
+    )
+    df1 = df[df['y1'] > df['x1']]
+    df2 = df[df['y1'] < df['x1']]
+    df2 = df2.rename(columns={'x1': 'y1', 'x2': 'y2', 'y1': 'x1', 'y2': 'x2'})
+    df = pd.concat([df1, df2])
+    df = df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+    df = df.reset_index(drop=True)
+    return df
+
+def read_chromosight_output_as_df(chromosight_output_path):
+    df = pd.read_csv(
+        chromosight_output_path, sep='\t',
+        header=0,
+        index_col=False,
+        usecols=[0, 1, 2, 3, 4, 5, 10],
+        names=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2', 'proba']
+    )
+    df1 = df[df['y1'] > df['x1']]
+    df2 = df[df['y1'] < df['x1']]
+    df2 = df2.rename(columns={'x1': 'y1', 'x2': 'y2', 'y1': 'x1', 'y2': 'x2'})
+    df = pd.concat([df1, df2])
+    df = df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+    df = df.reset_index(drop=True)
+    return df
+
+
+def read_hiccups_output_as_df(hiccups_output_path, resolution=10000):
+    hiccups_output_df = pd.read_csv(
+        hiccups_output_path, sep='\t',
+        header=None,
+        index_col=False,
+        comment='#',
+        usecols=[0, 1, 2, 3, 4, 5],
+        names=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2']
+    )
+    x_mid = (hiccups_output_df['x1'] + hiccups_output_df['x2']) // 2
+    y_mid = (hiccups_output_df['y1'] + hiccups_output_df['y2']) // 2
+    hiccups_output_df['x1'] = x_mid // resolution * resolution
+    hiccups_output_df['x2'] = hiccups_output_df['x1'] + resolution
+    hiccups_output_df['y1'] = y_mid // resolution * resolution
+    hiccups_output_df['y2'] = hiccups_output_df['y1'] + resolution
+
+    df1 = hiccups_output_df[hiccups_output_df['y1'] > hiccups_output_df['x1']]
+    df2 = hiccups_output_df[hiccups_output_df['y1'] < hiccups_output_df['x1']]
+    df2 = df2.rename(columns={'x1': 'y1', 'x2': 'y2', 'y1': 'x1', 'y2': 'x2'})
+    hiccups_output_df = pd.concat([df1, df2])
+
+    hiccups_output_df = hiccups_output_df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+    hiccups_output_df = hiccups_output_df.reset_index(drop=True)
+    return hiccups_output_df
+
+def read_SIP_output_as_df(SIP_output_path):
+    SIP_output_df = pd.read_csv(
+        SIP_output_path, sep='\t',
+        header=0,
+        index_col=False,
+        usecols=[0, 1, 2, 3, 4, 5],
+        names=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2']
+    )
+    df1 = SIP_output_df[SIP_output_df['y1'] > SIP_output_df['x1']]
+    df2 = SIP_output_df[SIP_output_df['y1'] < SIP_output_df['x1']]
+    df2 = df2.rename(columns={'x1': 'y1', 'x2': 'y2', 'y1': 'x1', 'y2': 'x2'})
+    SIP_output_df = pd.concat([df1, df2])
+    SIP_output_df = SIP_output_df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+    SIP_output_df = SIP_output_df.reset_index(drop=True)
+    return SIP_output_df
+
+
+def read_fithic_output_as_df(fithic_output_paths, resolution=10000, p_threshold=1e-6, q_threshold=0.01, get_proba=False):
+    label_dfs = []
+    for p in fithic_output_paths:
+        fithic_output_df = pd.read_csv(
+            p, sep='\t',
+            header=0,
+            index_col=False,
+            usecols=[0, 1, 2, 3, 5, 6],
+            names=['chrom1', 'x1', 'chrom2', 'y1', 'p_value', 'q_value']
+        )
+        fithic_output_df['x1'] = fithic_output_df['x1'] // resolution * resolution
+        fithic_output_df['y1'] = fithic_output_df['y1'] // resolution * resolution
+        fithic_output_df['x2'] = fithic_output_df['x1'] + resolution
+        fithic_output_df['y2'] = fithic_output_df['y1'] + resolution
+
+        fithic_output_df = fithic_output_df[fithic_output_df['p_value'] < p_threshold]
+        if get_proba:
+            fithic_output_df['proba'] = 1 - fithic_output_df['p_value']
+        fithic_output_df = fithic_output_df.drop(columns=['p_value'])
+        fithic_output_df = fithic_output_df[fithic_output_df['q_value'] < q_threshold]
+        fithic_output_df = fithic_output_df.drop(columns=['q_value'])
+
+        df1 = fithic_output_df[fithic_output_df['y1'] > fithic_output_df['x1']]
+        df2 = fithic_output_df[fithic_output_df['y1'] < fithic_output_df['x1']]
+        df2 = df2.rename(columns={'x1': 'y1', 'x2': 'y2', 'y1': 'x1', 'y2': 'x2'})
+        fithic_output_df = pd.concat([df1, df2])
+        fithic_output_df = fithic_output_df[fithic_output_df['y1'] - fithic_output_df['x1'] >= 100000]
+        fithic_output_df = fithic_output_df[fithic_output_df['y1'] - fithic_output_df['x1'] <= 1000000]
+        fithic_output_df = fithic_output_df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+        fithic_output_df = fithic_output_df.reset_index(drop=True)
+        label_dfs.append(fithic_output_df)
+    return pd.concat(label_dfs).reset_index(drop=True)
+
+
 def process_lifted_SIP_df(df, lower=100000, upper=1000000):
     df = df.reset_index(drop=True)
 

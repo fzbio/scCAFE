@@ -344,6 +344,29 @@ class MultiTaskVGAE(VGAE):
         return self.edge_decoder(z, edge_index)
 
 
+class ConditionalVGAE(VGAE):
+    def __init__(self, encoder, decoder):
+        super().__init__(encoder, decoder)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        r"""Resets all learnable parameters of the module."""
+        reset(self.encoder)
+        reset(self.decoder)
+
+    def encode(self, x, edge_index, condition):
+        x = torch.cat([x, condition], dim=-1)
+        return super().encode(x, edge_index)
+
+    def decode(self, z, edge_index, condition, sigmoid=True):
+        z = torch.cat([z, condition], dim=-1)
+        return self.decoder(z, edge_index, sigmoid=sigmoid)
+
+    def generate(self, edge_index, condition, z_shape):
+        z = torch.randn(z_shape).to(condition.device)
+        z = torch.cat([z, condition], dim=-1)
+        return self.decoder(z, edge_index)
+
 
 class AttentionLeEncoder(torch.nn.Module):
     def __init__(self, in_channels, out_channels):

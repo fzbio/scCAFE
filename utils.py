@@ -2,7 +2,18 @@ import pandas as pd
 import os
 import shutil
 import glob
+import json
+from types import SimpleNamespace
 
+
+def json_to_object(json_file_path):
+    # Read the JSON file
+    with open(json_file_path, 'r') as file:
+        json_data = json.load(file)
+
+    # Convert the JSON data into a SimpleNamespace object
+    obj = SimpleNamespace(**json_data)
+    return obj
 
 def filter_range_for_df(df, lower=100000, higher=1000000):
     return df[
@@ -132,3 +143,10 @@ def read_meta_data(meta_data_path):
 def get_cell_name_attribute_dict_from_metadata(meta_df, attribute):
     the_dict = dict(zip(meta_df['Cellname'], meta_df[attribute]))
     return the_dict
+
+
+if __name__ == '__main__':
+    obj = json_to_object('config_files/mES_predict_on_hPFC.json')
+    print(obj)
+    print(obj.name_parser)
+    print(obj.bedpe_dict)

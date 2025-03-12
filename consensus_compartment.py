@@ -7,7 +7,6 @@ from inference_configs import SelectedHyperparameters as hyperparams
 from schickit.utils import get_chrom_sizes, get_bin_count
 from middleware import MiddleWareDataset
 from compartment import CompartmentCaller
-from inference_configs import ExperimentInferenceConfigs as eic, CELL_SELECTION_SEED
 import cooler
 import tempfile
 import argparse

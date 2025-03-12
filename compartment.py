@@ -1,5 +1,4 @@
 from multiscale_calling import CrossStitchFeatureCaller
-from dcn.dcn import DCN
 import torch
 from nn_data import get_hmm_split_dataset
 from torch_geometric.loader import DataLoader
@@ -84,7 +83,7 @@ class CompartmentCaller(object):
 
 
     @torch.no_grad()
-    def predict_compartments(self, test_set: MiddleWareDataset, assembly_path, chrom_sizes_path, resolution, output_dir):
+    def predict_compartments(self, test_set: MiddleWareDataset, assembly_path, chrom_num, chrom_sizes_path, resolution, output_dir, save_to_hdf5):
         os.makedirs(output_dir, exist_ok=False)
         dataset_for_training_HMM = test_set[:100]
         loader_for_training_HMM = DataLoader(
@@ -101,7 +100,8 @@ class CompartmentCaller(object):
         gc_content_dict = {chrom: get_cg_content_bin_df(assembly_path, [chrom], resolution, chrom_sizes) for chrom in chrom_sizes}
 
         test_loader = DataLoader(test_set, 1, num_workers=0, pin_memory=False)
-        for ind, data in enumerate(tqdm(test_loader)):
+        cell_pred_dfs = []
+        for idx, data in enumerate(tqdm(test_loader)):
             x = data.x.detach().cpu().numpy()
 
             proba = hmm.predict_proba(x)
@@ -112,11 +112,21 @@ class CompartmentCaller(object):
 
             df = self.convert_batch_compartment_preds_to_df(proba_vec, data.chrom_name[0], chrom_sizes, resolution)
             short_cell_name = data.cell_name[0].split('/')[-1]
-            cell_csv_path = os.path.join(output_dir, f'{short_cell_name}.csv')
-            df.to_csv(
-                cell_csv_path, sep='\t', header=not os.path.exists(cell_csv_path),
-                index=False, mode='a', float_format='%.5f'
-            )
+            if save_to_hdf5:
+                h5_path = os.path.join(output_dir, f'compartment.h5')
+                if idx % chrom_num != chrom_num - 1:
+                    cell_pred_dfs.append(df)
+                else:
+                    cell_pred_dfs.append(df)
+                    cell_pred_df = pd.concat(cell_pred_dfs).reset_index(drop=True)
+                    cell_pred_df.to_hdf(h5_path, key=short_cell_name, mode='a')
+                    cell_pred_dfs = []
+            else:
+                cell_csv_path = os.path.join(output_dir, f'{short_cell_name}.csv')
+                df.to_csv(
+                    cell_csv_path, sep='\t', header=not os.path.exists(cell_csv_path),
+                    index=False, mode='a', float_format='%.5f'
+                )
 
     def convert_batch_compartment_preds_to_df(self, preds, chrom_name, chrom_sizes, resolution):
         df = create_bin_df(chrom_sizes, resolution, [chrom_name])

@@ -17,17 +17,22 @@ class PostProcessor(object):
         filter_df = pd.read_csv(filter_path, sep='\t', header=None, index_col=False, usecols=[0, 1, 2])
         self.filter_df = filter_df.drop_duplicates()
 
-    def remove_invalid_loops(self, df, output_path=None, proba_threshold=None, verbose=False):
-        if self.filter_df is None:
-            raise Exception('Must call read_filter_file before calling this method.')
-        if verbose:
-            print(f'{len(df)} raw loops.')
+    def filter_loop_df(self, df):
         df1 = df.merge(self.filter_df, how='left', left_on=['chrom1', 'x1'], right_on=[0, 1], indicator=True)
         df2 = df.merge(self.filter_df, how='left', left_on=['chrom2', 'y1'], right_on=[0, 1], indicator=True)
         mask1 = df1['_merge'] == 'left_only'
         mask2 = df2['_merge'] == 'left_only'
         mask = mask1 & mask2
         clean_df = df[mask]
+        clean_df = clean_df.reset_index(drop=True)
+        return clean_df
+
+    def remove_invalid_loops(self, df, output_path=None, proba_threshold=None, verbose=False):
+        if self.filter_df is None:
+            raise Exception('Must call read_filter_file before calling this method.')
+        if verbose:
+            print(f'{len(df)} raw loops.')
+        clean_df = self.filter_loop_df(df)
         if proba_threshold is not None:
             clean_df = clean_df[clean_df['proba']>=proba_threshold]
         if verbose:
@@ -36,18 +41,47 @@ class PostProcessor(object):
             clean_df.to_csv(output_path, sep='\t', header=True, index=False, float_format='%.5f')
         return clean_df
 
+    def remove_invalid_loops_and_output_to_h5(self, df, output_h5_path, key_name,
+                                                    proba_threshold=None, verbose=False):
+        if self.filter_df is None:
+            raise Exception('Must call read_filter_file before calling this method.')
+        if verbose:
+            print(f'{len(df)} raw loops.')
+        clean_df = self.filter_loop_df(df)
+        if proba_threshold is not None:
+            clean_df = clean_df[clean_df['proba']>=proba_threshold]
+        if verbose:
+            print(f'{len(clean_df)} loops after filtering.')
+        clean_df.to_hdf(output_h5_path, key=key_name, mode='a')
+
+
     def remove_invalid_loops_in_dir(self, in_dir, out_dir, proba_threshold=None, verbose=False):
         # print(self.filter_df)
         os.makedirs(out_dir, exist_ok=False)
         cell_pred_paths = glob.glob(os.path.join(in_dir, '*.csv'))
-        for pred_path in cell_pred_paths:
-            if verbose:
-                print(f'Processing {pred_path}')
-            df = pd.read_csv(pred_path, header=0, index_col=False, sep='\t')
-            file_name = pred_path.split('/')[-1]
-            df = self.remove_invalid_loops(
-                df, output_path=os.path.join(out_dir, file_name), proba_threshold=proba_threshold, verbose=verbose
-            )
+        if len(cell_pred_paths) != 0:
+            for pred_path in cell_pred_paths:
+                if verbose:
+                    print(f'Processing {pred_path}')
+                df = pd.read_csv(pred_path, header=0, index_col=False, sep='\t')
+                file_name = pred_path.split('/')[-1]
+                df = self.remove_invalid_loops(
+                    df, output_path=os.path.join(out_dir, file_name), proba_threshold=proba_threshold, verbose=verbose
+                )
+        else:
+            h5_paths = glob.glob(os.path.join(in_dir, '*.h5'))
+            assert len(h5_paths) == 1
+            h5_path = h5_paths[0]
+            with pd.HDFStore(h5_path, mode='r') as hdf:
+                h5_keys = hdf.keys()
+            for key in h5_keys:
+                if verbose:
+                    print(f'Processing {key}')
+                df = pd.read_hdf(h5_path, key)
+                df = self.remove_invalid_loops_and_output_to_h5(
+                    df, output_h5_path=os.path.join(out_dir, os.path.basename(h5_path)), key_name=key,
+                    proba_threshold=proba_threshold, verbose=verbose
+                )
 
 
 if __name__ == '__main__':

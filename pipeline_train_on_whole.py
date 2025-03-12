@@ -11,7 +11,6 @@ from nn_data import StreamScoolDataset, get_train_val_scools
 import random
 from utils import hpc_celltype_parser, get_split_scool_paths, get_loop_calling_dataset_paths, remove_datasets
 import configs
-from configs import TrainConfigs as tc
 from configs import CompilationConfigs as cc
 import sys
 from distutils.util import strtobool
@@ -20,6 +19,12 @@ import tempfile
 from schickit.utils import get_chrom_sizes
 import argparse
 from multiscale_calling import MultitaskFeatureCaller
+from utils import json_to_object
+
+
+PARSER_MAP = {
+    'hpc': hpc_celltype_parser
+}
 
 
 if __name__ == '__main__':
@@ -27,11 +32,15 @@ if __name__ == '__main__':
     parser.add_argument('seed_shift', type=int)
     parser.add_argument('K', type=int)
     parser.add_argument('run_id', type=str)
+    parser.add_argument('config_path', type=str)
     parser.add_argument('-d', '--use-existing-data', action='store_true')
     args = parser.parse_args()
     seed_shift = args.seed_shift  # Different from the cv pipeline, we do not need to train multiple times.
     K = args.K
     run_id = args.run_id   # Get the ID from the command line, so that the script is more flexibly controlled by the user.
+    config_path = args.config_path
+    assert os.path.isfile(config_path)
+    tc = json_to_object(config_path)
     use_existing_data = args.use_existing_data
 
     alpha = 0.5
@@ -82,11 +91,14 @@ if __name__ == '__main__':
         get_loop_calling_dataset_paths(tc.graph_dir, loop_calling_dataset_name)
     # Feature calling starts here
     # chroms = ['chr21', 'chr22']
+    name_parser = tc.name_parser
+    if name_parser is not None:
+        name_parser = PARSER_MAP[name_parser]
     train_set = StreamScoolDataset(
         loop_calling_train,
         imputed_finer_scool_train,
         tc.train_chroms, 10000, tc.bedpe_dict, tc.tad_dict,
-        tc.name_parser, tc.desired_cell_types,
+        name_parser, tc.desired_cell_types,
         pre_transform=T.Compose([
             RemoveSelfLooping(),
             ReadKmerFeatures(
@@ -103,7 +115,7 @@ if __name__ == '__main__':
         loop_calling_val,
         imputed_finer_scool_val,
         tc.val_chroms, 10000, tc.bedpe_dict, tc.tad_dict,
-        tc.name_parser, tc.desired_cell_types,
+        name_parser, tc.desired_cell_types,
         pre_transform=T.Compose([
             RemoveSelfLooping(),
             ReadKmerFeatures(
@@ -119,7 +131,7 @@ if __name__ == '__main__':
     assert len(train_set) > len(val_set)
 
     feature_caller = MultitaskFeatureCaller(
-        run_id, tc.chroms, f'{tc.model_dir}/{run_id}.pt', train_set.num_features,
+        run_id, f'{tc.model_dir}/{run_id}.pt', train_set.num_features,
         alpha, beta
     )
     feature_caller.train(train_set, val_set, epochs=tc.epochs)

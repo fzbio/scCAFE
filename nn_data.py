@@ -1,22 +1,15 @@
-import gc
-import glob
-from inspect import isfunction
 import numpy as np
 from torch_geometric.data import Dataset
-from os import path
 import cooler
 from schickit.data_reading import read_cool_as_sparse, read_loops_as_sparse, \
     read_multiple_cell_loops, read_multiple_cell_tad_scores
 from schickit.data_storage import copy_coolers_from_scool
 import pandas as pd
 from torch_geometric.data import Data
-from tqdm.auto import tqdm
-from torch_geometric.utils import negative_sampling, remove_self_loops
+from torch_geometric.utils import negative_sampling, remove_self_loops, to_dense_adj
 from torch_geometric.transforms import BaseTransform
 import torch
 import copy
-import os
-from torchvision import transforms
 import random
 from positional_encodings.torch_encodings import PositionalEncoding1D, Summer
 from sklearn.preprocessing import StandardScaler
@@ -55,21 +48,31 @@ class GaussianNoise(BaseTransform):
 
 
 class PositionalEncoding(BaseTransform):
-    def __init__(self, dim=322):
+    def __init__(self, dim=322, as_condition=False):
         self.dim = dim
+        self.as_condition = as_condition
         self.p_enc_1d_model = Summer(PositionalEncoding1D(dim))
 
     def __call__(self, data):
-        assert data.x is not None
-        assert data.x.size()[1] == self.dim
-        x = self.p_enc_1d_model(data.x[None, :, :])
-        x = torch.squeeze(x, 0)
-        data.x = x
-        return data
+        if not self.as_condition:
+            assert data.x is not None
+            assert data.x.size()[1] == self.dim
+            x = self.p_enc_1d_model(data.x[None, :, :])
+            x = torch.squeeze(x, 0)
+            data.x = x
+            return data
+        else:
+            assert hasattr(data, 'condition')
+            assert data.condition.size()[1] == self.dim
+            condition = self.p_enc_1d_model(data.condition[None, :, :])
+            condition = torch.squeeze(condition, 0)
+            data.condition = condition
+            return data
 
 
 class ReadKmerFeatures(BaseTransform):
-    def __init__(self, kmer_input_path, chroms, is_train_set, scaler_path):
+    def __init__(self, kmer_input_path, chroms, is_train_set, scaler_path, as_condition=False):
+        self.as_condition = as_condition
         self.kmer_path = kmer_input_path
         self.kmer_df = pd.read_csv(self.kmer_path, sep='\t', header=0, index_col=False)
         self.kmer_df = self.kmer_df[self.kmer_df['chrom'].isin(chroms)]
@@ -91,16 +94,24 @@ class ReadKmerFeatures(BaseTransform):
         current_df = self.desired_chrom_dfs[data.chrom_name]
         assert len(current_df) == data.num_nodes
         mat = torch.FloatTensor(current_df.iloc[:, 3:].to_numpy())
-        if data.x is not None:
-            data.x = data.x.view(-1, 1) if data.x.dim() == 1 else data.x
-            data.x = torch.cat([data.x, mat], dim=-1)
+        if not self.as_condition:
+            if data.x is not None:
+                data.x = data.x.view(-1, 1) if data.x.dim() == 1 else data.x
+                data.x = torch.cat([data.x, mat], dim=-1)
+            else:
+                data.x = mat
         else:
-            data.x = mat
+            if hasattr(data, 'condition'):
+                data.condition = data.condition.view(-1, 1) if data.condition.dim() == 1 else data.condition
+                data.condition = torch.cat([data.condition, mat], dim=-1)
+            else:
+                data.condition = mat
         return data
 
 
 class ReadMotifFeatures(BaseTransform):
-    def __init__(self, motif_input_path, chroms, is_train_set, scaler_path):
+    def __init__(self, motif_input_path, chroms, is_train_set, scaler_path, as_condition=False):
+        self.as_condition = as_condition
         self.motif_path = motif_input_path
         self.motif_df = pd.read_csv(self.motif_path, sep='\t', header=0, index_col=False)
         self.motif_df = self.motif_df[self.motif_df['chrom'].isin(chroms)]
@@ -122,11 +133,61 @@ class ReadMotifFeatures(BaseTransform):
         current_df = self.desired_chrom_dfs[data.chrom_name]
         assert len(current_df) == data.num_nodes
         mat = torch.FloatTensor(current_df.iloc[:, 3:].to_numpy())
+        if not self.as_condition:
+            if data.x is not None:
+                data.x = data.x.view(-1, 1) if data.x.dim() == 1 else data.x
+                data.x = torch.cat([data.x, mat], dim=-1)
+            else:
+                data.x = mat
+        else:
+            if hasattr(data, 'condition'):
+                data.condition = data.condition.view(-1, 1) if data.condition.dim() == 1 else data.condition
+                data.condition = torch.cat([data.condition, mat], dim=-1)
+            else:
+                data.condition = mat
+        return data
+
+
+class CreateInteractionFeatures(BaseTransform):
+    def __init__(self):
+        pass
+
+    def extract_diagonal_entries(self, edge_index, num_nodes, window=200):
+        """
+        从一个稀疏的 COO 矩阵中提取对角线附近的元素。
+
+        参数:
+        - coo_matrix: 一个 PyTorch 的稀疏 COO 格式矩阵
+        - window: 从对角线两侧各提取的元素数量 (默认为100)
+
+        返回:
+        - 一个形状为 (N, 2*window) 的张量，其中 N 是矩阵的行数，每行包含对角线附近的 2*window 个元素
+        """
+        # 将 COO 矩阵转为稠密矩阵
+        dense_matrix = to_dense_adj(edge_index, max_num_nodes=num_nodes).squeeze()
+        # 获取矩阵形状
+        n_rows, n_cols = dense_matrix.shape
+        # 构造对角线的列索引范围
+        diag_indices = torch.arange(n_rows)
+        # 构造窗口范围，限制在矩阵范围内
+        col_indices = torch.arange(-window, window + 1)  # [-10, -9, ..., 0, ..., 9, 10]
+        col_indices = col_indices.unsqueeze(0) + diag_indices.unsqueeze(1)  # 广播加法
+        # 将超出矩阵边界的索引裁剪到合法范围
+        col_indices = col_indices.clamp(0, n_cols - 1)
+
+        # 使用 advanced indexing 提取元素
+        extracted = dense_matrix[torch.arange(n_rows).unsqueeze(1), col_indices]
+
+        return extracted
+
+    def __call__(self, data):
         if data.x is not None:
             data.x = data.x.view(-1, 1) if data.x.dim() == 1 else data.x
-            data.x = torch.cat([data.x, mat], dim=-1)
+            extracted = self.extract_diagonal_entries(data.edge_index, data.num_nodes)
+            data.x = torch.cat([data.x, extracted], dim=-1)
         else:
-            data.x = mat
+            extracted = self.extract_diagonal_entries(data.edge_index, data.num_nodes)
+            data.x = extracted
         return data
 
 
@@ -371,7 +432,7 @@ class StreamScoolDataset(Dataset):
         mat = cooler.Cooler(self.scool_path + '::' + cell_name).matrix(balance=False, sparse=True).fetch(chrom_name)
         loop = self._loop_label_list[cell_i * len(self.chrom_names) + chrom_j]
         tad_score = self._tad_label_list[cell_i * len(self.chrom_names) + chrom_j]
-        graph = Data(x=None, num_nodes=mat.shape[0], edge_index=torch.tensor([mat.row, mat.col], dtype=torch.long))
+        graph = Data(x=None, num_nodes=mat.shape[0], edge_index=torch.tensor(np.array([mat.row, mat.col]), dtype=torch.long))
         graph.edge_weights = torch.tensor(mat.data, dtype=torch.float) if self.weighted else None
         graph.edge_label_index = torch.tensor([loop.row, loop.col], dtype=torch.long)
         graph.tad_label = torch.tensor(tad_score, dtype=torch.float)

@@ -8,6 +8,7 @@ from torch_geometric.loader import DataLoader
 from gnns import AttentionLeEncoder, DenseNodeDecoder, AutomaticWeightedLoss, \
     CrossStitchedGAE, CrossStitchedVGAE, SingleTaskGAE, SingleTaskVGAE, DenseSingleTaskDecoder, NodeHead, EdgeHead, GraphSageEncoder, VariationalGraphSageEncoder
 from tqdm.auto import tqdm
+
 from train_utils import EarlyStopper, save_model, load_model
 from nn_data import RemoveSelfLooping, easy_to_device
 from nn_data import ShortDistanceNegSampler, colwise_in
@@ -16,13 +17,16 @@ from configs import DEVICE, LOADER_WORKER
 from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 from torchmetrics import MeanSquaredError, MeanAbsolutePercentageError
 from torch.utils.data import RandomSampler
-from configs import CompilationConfigs, TrainConfigs, SEED
+from configs import CompilationConfigs, SEED
 from schickit.utils import create_bin_df, get_chrom_sizes
+from sklearn.decomposition import PCA
 from layers import torch_algrelmax
 from nn_data import short_dist_neg_sampling, filter_range
 EPS = 1e-7
 from gnns import DenseEdgeDecoder, MultiTaskVGAE
 from torch_geometric.utils import sort_edge_index
+from nn_data import kth_diag_indices
+import h5py
 
 # torch.manual_seed(SEED)
 # np.random.seed(SEED)
@@ -53,11 +57,33 @@ def deduplicate_bedpe_dir(bedpe_dir):
         df.to_csv(bedpe_path, sep='\t', header=True, index=False)
 
 
+def sum_every_n_elements(vector, n):
+    # Convert the input vector to a NumPy array
+    array = np.array(vector)
+
+    # Calculate the number of complete chunks of size n
+    num_chunks = len(array) // n
+
+    # Reshape the array to (-1, n) for complete chunks and sum along axis 1
+    pooled_vector = np.sum(array[:num_chunks * n].reshape(-1, n), axis=1)
+
+    # Handle the remaining elements, if any
+    if len(array) % n != 0:
+        remaining_sum = np.sum(array[num_chunks * n:])
+        pooled_vector = np.append(pooled_vector, remaining_sum)
+
+    return pooled_vector
+
+
+def pool_every_k_nodes(x, k):
+    x = np.apply_along_axis(sum_every_n_elements, 0, x, k)
+    x = x / k
+    return x
+
 
 class MultitaskFeatureCaller(object):
-    def __init__(self, run_id, chroms, model_path, num_feature, alpha, beta, log_dir=None):
+    def __init__(self, run_id, model_path, num_feature, alpha, beta, log_dir=None):
         self.run_id = run_id
-        self.chroms = chroms
         self.model_path = model_path
         self.log_dir = log_dir
 
@@ -194,7 +220,7 @@ class MultitaskFeatureCaller(object):
         # print(np.mean(np.asarray(kl_losses)))
         return mean_auroc, mean_ap, np.mean(np.asarray(losses)), np.mean(np.asarray(loop_losses)), np.mean(np.asarray(recon_losses))
 
-    def train(self, train_set, val_set, bs=1, epochs=100):
+    def train(self, train_set, val_set, bs=1, epochs=100, sample_per_epoch=100):
         print('Training the loop classifier...')
         loop_optimizer = torch.optim.Adam(
             self.vgae.parameters(),
@@ -205,7 +231,7 @@ class MultitaskFeatureCaller(object):
                 pin_memory=False, exclude_keys=['edge_weights', 'cell_name', 'chrom_name', 'cell_type'],
                 sampler=RandomSampler(
                     train_set, replacement=True,
-                    num_samples=TrainConfigs.train_samples_per_epoch
+                    num_samples=sample_per_epoch
                 ),
             ), \
             DataLoader(
@@ -245,7 +271,9 @@ class MultitaskFeatureCaller(object):
                 break
 
     @torch.no_grad()
-    def predict(self, loop_dir, test_set, device, loop_threshold, resolution=10000, progress_bar=True, output_embedding=None):
+    def predict(self, loop_dir, test_set, chrom_num, device, loop_threshold,
+                resolution=10000, progress_bar=True, output_embedding=None,
+                save_to_h5=False, ancient_genome=False):
         bs = 1
         vgae = self.vgae.to(device)
         vgae.eval()
@@ -257,7 +285,8 @@ class MultitaskFeatureCaller(object):
             os.makedirs(output_embedding, exist_ok=False)
 
         print('Predicting...')
-        for batch in (tqdm(loader) if progress_bar else loader):
+        cell_pred_dfs = []
+        for idx, batch in (enumerate(tqdm(loader)) if progress_bar else enumerate(loader)):
             batch = easy_to_device(batch, device, attrs_to_remove)
             z = vgae.encode(batch.x, batch.edge_index)
             preds = vgae.decode(z, batch.edge_index, sigmoid=True)
@@ -267,21 +296,195 @@ class MultitaskFeatureCaller(object):
             assert len(df) == edges.shape[1]
             df = up_lower_tria_vote(df)
             assert len(df) == edges.shape[1] // 2
-            df = remove_short_distance_loops(df)
+            if ancient_genome:
+                df = remove_short_distance_loops(df, 20000, 1000000)
+            else:
+                df = remove_short_distance_loops(df)
             df = df[df['proba'] >= loop_threshold]
             df = df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])  # Do we really need to do this?
             df = df.reset_index(drop=True)
             short_cell_name = batch.cell_name[0].split('/')[-1]
-            cell_csv_path = os.path.join(loop_dir, f'{short_cell_name}.csv')
-            df.to_csv(
-                cell_csv_path, sep='\t', header=not os.path.exists(cell_csv_path),
-                index=False, mode='a', float_format='%.5f'
-            )
+            if not save_to_h5:
+                cell_csv_path = os.path.join(loop_dir, f'{short_cell_name}.csv')
+                df.to_csv(
+                    cell_csv_path, sep='\t', header=not os.path.exists(cell_csv_path),
+                    index=False, mode='a', float_format='%.5f'
+                )
+            else:
+                h5_path = os.path.join(loop_dir, f'loop.h5')
+                if idx % chrom_num != chrom_num - 1:
+                    cell_pred_dfs.append(df)
+                else:
+                    cell_pred_dfs.append(df)
+                    cell_pred_df = pd.concat(cell_pred_dfs).reset_index(drop=True)
+                    cell_pred_df.to_hdf(h5_path, key=short_cell_name, mode='a')
+                    cell_pred_dfs = []
+
             if output_embedding is not None:
-                current_chr = batch.chrom_name[0]
-                emb_path = os.path.join(output_embedding, f'{short_cell_name}_{current_chr}.npy')
-                np.save(emb_path, z.detach().cpu().numpy())
+                embedding_h5_path = os.path.join(output_embedding, f'embeddings.h5')
+                with h5py.File(embedding_h5_path, "a") as h5file:
+                    current_cell_name = batch.cell_name[0]
+                    current_chr = batch.chrom_name[0]
+                    if idx % chrom_num == 0:
+                        h5file.create_group(current_cell_name)
+                    else:
+                        assert current_cell_name in h5file
+                    h5file[current_cell_name].create_dataset(
+                        current_chr, data=z.detach().cpu().numpy(), compression='gzip',
+                        compression_opts=6
+                    )
         print('Done!')
+
+
+    @torch.no_grad()
+    def predict_all(self, loop_dir, test_set, chrom_num, device, loop_threshold, lower, upper,
+                resolution=10000):
+        bs = 1
+        vgae = self.vgae.to(device)
+        vgae.eval()
+        os.makedirs(loop_dir, exist_ok=False)
+        loader = DataLoader(test_set, bs, num_workers=LOADER_WORKER, pin_memory=False, )
+        attrs_to_remove = ['chrom_name', 'cell_name', 'cell_type', 'edge_weights', 'edge_label_index']
+        h5_path = os.path.join(loop_dir, f'loop.h5')
+
+        print('Predicting...')
+        cell_pred_dfs = []
+        chrom_entry_dict = {}
+        for idx, batch in enumerate(tqdm(loader)):
+            bin_count = batch.num_nodes
+            if batch.chrom_name[0] not in chrom_entry_dict:
+                chrom_complete_entry_list = []
+                for k in range(lower, upper + 1):
+                    rows, cols = kth_diag_indices(bin_count, k)
+                    current_edges = torch.tensor(np.array([rows, cols]))
+                    chrom_complete_entry_list.append(current_edges)
+                chrom_entry_dict[batch.chrom_name[0]] = torch.cat(chrom_complete_entry_list, dim=1)
+            batch = easy_to_device(batch, device, attrs_to_remove)
+            z = vgae.encode(batch.x, batch.edge_index)
+            edges = chrom_entry_dict[batch.chrom_name[0]]
+            preds = vgae.decode(z, edges, sigmoid=True)
+            preds = preds.detach().cpu().numpy()
+            df = self.convert_batch_loop_preds_to_df(preds, edges, batch.chrom_name[0], resolution)
+            df = df[df['proba'] >= loop_threshold]
+            # df = df.drop_duplicates(subset=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2'])
+            df = df.reset_index(drop=True)
+            short_cell_name = batch.cell_name[0].split('/')[-1]
+
+            if idx % chrom_num != chrom_num - 1:
+                cell_pred_dfs.append(df)
+            else:
+                cell_pred_dfs.append(df)
+                cell_pred_df = pd.concat(cell_pred_dfs).reset_index(drop=True)
+                cell_pred_df.to_hdf(h5_path, key=short_cell_name, mode='a')
+                cell_pred_dfs = []
+        print('Done!')
+
+
+    @torch.no_grad()
+    def generate_pooled_cell_embeddings(self, test_set, chroms, device, embedding_dir, progress_bar=True):
+        np.random.seed(1212)
+        bs = 1
+        vgae = self.vgae.to(device)
+        vgae.eval()
+        attrs_to_remove = ['chrom_name', 'cell_name', 'cell_type', 'edge_weights', 'edge_label_index']
+        os.makedirs(embedding_dir, exist_ok=False)
+        cell_names = None
+        with h5py.File(os.path.join(embedding_dir, 'embeddings.h5'), "a") as h5file:
+            for i, chrom in enumerate(chroms):
+                print(f'Processing {chrom}...')
+                indices_of_chrom = np.arange(len(test_set) // len(chroms)) * len(chroms) + i
+                chrom_sub_dataset = test_set.index_select(indices_of_chrom)
+                indices_for_pca = np.random.choice(len(chrom_sub_dataset), 10, replace=False)
+                embeddings_for_pca = []
+                for index in indices_for_pca:
+                    data = chrom_sub_dataset[index].to(device)
+                    embedding = vgae.encode(data.x, data.edge_index)
+                    embedding = embedding.detach().cpu().numpy()
+                    embeddings_for_pca.append(embedding)
+                embeddings_for_pca = np.concatenate(embeddings_for_pca, axis=0)
+                print('Fitting PCA...')
+                pca = PCA(n_components=1)
+                pca.fit(embeddings_for_pca)
+                print('PCA fitted.')
+                cells_current_chrom_vecs = []
+                chrom_cell_names = []
+                loader = DataLoader(chrom_sub_dataset, bs, num_workers=LOADER_WORKER, pin_memory=False, )
+                for idx, batch in enumerate(tqdm(loader, leave=False)):
+                    batch = easy_to_device(batch, device, attrs_to_remove)
+                    assert batch.chrom_name[0] == chrom
+                    z = vgae.encode(batch.x, batch.edge_index)
+                    z = z.detach().cpu().numpy()
+                    z = pca.transform(z).flatten()
+                    short_cell_name = batch.cell_name[0].split('/')[-1]
+                    cells_current_chrom_vecs.append(z)
+                    chrom_cell_names.append(short_cell_name)
+                if cell_names is None:
+                    cell_names = chrom_cell_names
+                else:
+                    assert cell_names == chrom_cell_names
+                cell_current_chrom_vecs = np.array(cells_current_chrom_vecs)
+                h5file.create_dataset(
+                    chrom, data=cell_current_chrom_vecs,
+                    compression='gzip', compression_opts=6
+                )
+        cell_names = pd.DataFrame({'cell_name': cell_names})
+        cell_names.to_hdf(os.path.join(embedding_dir, 'embeddings.h5'), key='cell_names', mode='a')
+        print('Done!')
+
+
+
+
+
+    # @torch.no_grad()
+    # def generate_pooled_cell_embeddings(self, test_set, chrom_num, device, embedding_dir, progress_bar=True):
+    #     bs = 1
+    #     vgae = self.vgae.to(device)
+    #     vgae.eval()
+    #     loader = DataLoader(test_set, bs, num_workers=LOADER_WORKER, pin_memory=False, )
+    #     attrs_to_remove = ['chrom_name', 'cell_name', 'cell_type', 'edge_weights', 'edge_label_index']
+    #
+    #     os.makedirs(embedding_dir, exist_ok=False)
+    #
+    #     indices_for_pca = np.random.choice(len(test_set), 100, replace=False)
+    #     embeddings_for_pca = []
+    #     for index in indices_for_pca:
+    #         data = test_set[index].to(device)
+    #         embedding = vgae.encode(data.x, data.edge_index)
+    #         embedding = embedding.detach().cpu().numpy()
+    #         embedding = pool_every_k_nodes(embedding, 10)
+    #         embeddings_for_pca.append(embedding)
+    #     embeddings_for_pca = np.concatenate(embeddings_for_pca, axis=0)
+    #     print('Fitting PCA...')
+    #     pca = PCA(n_components=1)
+    #     pca.fit(embeddings_for_pca)
+    #     print('PCA fitted.')
+    #
+    #
+    #     print('Predicting...')
+    #     current_cell_embeddings = []
+    #     embedding_h5_path = os.path.join(embedding_dir, f'embeddings.h5')
+    #     with h5py.File(embedding_h5_path, "a") as h5file:
+    #         for idx, batch in (enumerate(tqdm(loader)) if progress_bar else enumerate(loader)):
+    #             batch = easy_to_device(batch, device, attrs_to_remove)
+    #             z = vgae.encode(batch.x, batch.edge_index)
+    #             z = z.detach().cpu().numpy()
+    #             z = pool_every_k_nodes(z, 10)
+    #             z = pca.transform(z).flatten()
+    #             short_cell_name = batch.cell_name[0].split('/')[-1]
+    #             if idx % chrom_num == chrom_num - 1:
+    #                 assert short_cell_name not in h5file
+    #                 current_cell_embeddings.append(z)
+    #                 current_cell_embedding = np.concatenate(current_cell_embeddings, axis=0)
+    #                 h5file.create_dataset(
+    #                     short_cell_name, data=current_cell_embedding,
+    #                     compression='gzip', compression_opts=6
+    #                 )
+    #                 current_cell_embeddings = []
+    #             else:
+    #                 assert short_cell_name not in h5file
+    #                 current_cell_embeddings.append(z)
+    #
+    #     print('Done!')
 
 
     def convert_batch_loop_preds_to_df(self, preds, edges, chrom_name, resolution):
@@ -480,14 +683,14 @@ class CrossStitchFeatureCaller(object):
             np.mean(np.asarray(losses)), np.mean(np.asarray(loss_edge_list)), np.mean(np.asarray(loss_node_list))
 
 
-    def train(self, train_set, val_set, bs=1, epochs=100):
+    def train(self, train_set, val_set, bs=1, epochs=100, sample_per_epoch=100):
         train_loader, val_loader = \
             DataLoader(
                 train_set, bs, num_workers=LOADER_WORKER,
                 pin_memory=False, exclude_keys=['edge_weights', 'cell_name', 'chrom_name', 'cell_type'],
                 sampler=RandomSampler(
                     train_set, replacement=True,
-                    num_samples=TrainConfigs.train_samples_per_epoch
+                    num_samples=100
                 ),
             ), \
             DataLoader(

@@ -26,11 +26,12 @@ from matplotlib import pyplot as plt
 from middleware import MiddleWareDataset
 from tad_calling import TadCaller
 from compartment import CompartmentCaller
+import h5py
 
 
 def predict_compartment_on_other_dataset(trained_model_dir, run_id, chroms, bedpe_dict, tad_dict, finer_scool_path,
                                     graph_dataset_path, compartment_out_dir, kmer_feature_path,
-                                    motif_feature_path, chrom_sizes_path, resolution, assembly_path,
+                                    motif_feature_path, chrom_sizes_path, resolution, save_to_hdf, assembly_path,
                                     name_parser=None, desired_cell_type=None):
     graph_dataset = StreamScoolDataset(
         graph_dataset_path,
@@ -52,19 +53,20 @@ def predict_compartment_on_other_dataset(trained_model_dir, run_id, chroms, bedp
         ])
     )
     feature_caller = MultitaskFeatureCaller(
-        run_id, chroms, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
+        run_id, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
         hyperparams.alpha, hyperparams.beta
     )
     feature_caller.load_model()
     test_set = MiddleWareDataset(graph_dataset, feature_caller)
     compartment_caller = CompartmentCaller()
     compartment_caller.predict_compartments(
-        test_set, assembly_path, chrom_sizes_path, resolution, compartment_out_dir)
+        test_set, assembly_path, len(chroms), chrom_sizes_path, resolution, compartment_out_dir, save_to_hdf)
 
 
 def predict_tads_on_other_dataset(trained_model_dir, run_id, chroms, bedpe_dict, tad_dict, finer_scool_path,
-                                    graph_dataset_path, tad_out_dir, kmer_feature_path,
-                                    motif_feature_path, chrom_sizes_path, resolution,
+                                    graph_dataset_path, tad_out_dir, tad_filtered_dir, kmer_feature_path,
+                                    motif_feature_path, chrom_sizes_path, resolution, save_to_hdf, ref_tad_size,
+                                    cluster_metric_plot_path=None,
                                     name_parser=None, desired_cell_type=None):
         graph_dataset = StreamScoolDataset(
             graph_dataset_path,
@@ -86,24 +88,32 @@ def predict_tads_on_other_dataset(trained_model_dir, run_id, chroms, bedpe_dict,
             ])
         )
         feature_caller = MultitaskFeatureCaller(
-            run_id, chroms, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
+            run_id, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
             hyperparams.alpha, hyperparams.beta
         )
         feature_caller.load_model()
         test_set = MiddleWareDataset(graph_dataset, feature_caller)
 
         tad_caller = TadCaller(motif_feature_path)
+        if isinstance(ref_tad_size, str):
+            best_mean_tad_size = tad_caller.select_best_average_size(test_set, ref_tad_size, plot_path=cluster_metric_plot_path)
+        elif isinstance(ref_tad_size, int):
+            best_mean_tad_size = ref_tad_size
+        else:
+            raise ValueError('ref_tad_size must be a string or an integer')
         tad_caller.predict(
-            tad_out_dir, test_set, DEVICE, get_chrom_sizes(chrom_sizes_path), resolution
+            tad_out_dir, tad_filtered_dir, test_set, len(chroms), get_chrom_sizes(chrom_sizes_path),
+            resolution, best_mean_tad_size, save_to_hdf
         )
 
 
 
 
 def predict_on_other_dataset(trained_model_dir, run_id, chroms, bedpe_dict, tad_dict, finer_scool_path,
-                             graph_dataset_path, thresh, loop_out_dir, tad_out_dir, kmer_feature_path,
-                             motif_feature_path, chrom_sizes_path,
-                             name_parser=None, desired_cell_type=None, output_embedding=None):
+                             graph_dataset_path, thresh, loop_out_dir, kmer_feature_path,
+                             motif_feature_path, predict_all, lower_upper_bound=None,
+                             name_parser=None, desired_cell_type=None, output_embedding=None,
+                             save_to_hdf=False):
     graph_dataset = StreamScoolDataset(
         graph_dataset_path,
         finer_scool_path,
@@ -124,22 +134,98 @@ def predict_on_other_dataset(trained_model_dir, run_id, chroms, bedpe_dict, tad_
         ])
     )
     feature_caller = MultitaskFeatureCaller(
-        run_id, chroms, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
+        run_id, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
+        hyperparams.alpha, hyperparams.beta
+    )
+    feature_caller.load_model()
+    if not predict_all:
+        feature_caller.predict(
+            loop_out_dir, graph_dataset, len(chroms), DEVICE, thresh, output_embedding=output_embedding, save_to_h5=save_to_hdf
+        )
+    else:
+        print('Predicting all loops')
+        assert lower_upper_bound is not None
+        feature_caller.predict_all(
+            loop_out_dir, graph_dataset, len(chroms), DEVICE, thresh,
+            lower=lower_upper_bound[0], upper=lower_upper_bound[1]
+        )
+
+
+def predict_on_ancient_genome(trained_model_dir, run_id, chroms, bedpe_dict, tad_dict, finer_scool_path,
+                             graph_dataset_path, thresh, loop_out_dir, kmer_feature_path,
+                             motif_feature_path,
+                             name_parser=None, desired_cell_type=None, output_embedding=None,
+                             save_to_hdf=False):
+    graph_dataset = StreamScoolDataset(
+        graph_dataset_path,
+        finer_scool_path,
+        chroms, 10000,
+        bedpe_dict, tad_dict,
+        name_parser, desired_cell_type,
+        pre_transform=T.Compose([
+            RemoveSelfLooping(),
+            ReadKmerFeatures(
+                kmer_feature_path, chroms, False,
+                os.path.join(trained_model_dir, f'{run_id}_kmer_scaler_calling.pkl')
+            ),
+            ReadMotifFeatures(
+                motif_feature_path, chroms, False,
+                os.path.join(trained_model_dir, f'{run_id}_motif_scaler_calling.pkl')
+            ),
+            PositionalEncoding()
+        ])
+    )
+    feature_caller = MultitaskFeatureCaller(
+        run_id, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
         hyperparams.alpha, hyperparams.beta
     )
     feature_caller.load_model()
     feature_caller.predict(
-        loop_out_dir, graph_dataset, DEVICE, thresh, output_embedding=output_embedding
+        loop_out_dir, graph_dataset, len(chroms), DEVICE, thresh,
+        output_embedding=output_embedding, save_to_h5=save_to_hdf,
+        ancient_genome=True
+    )
+
+def generate_pooled_cell_embeddings(trained_model_dir, run_id, chroms, bedpe_dict, tad_dict, finer_scool_path,
+                             graph_dataset_path, kmer_feature_path,
+                             motif_feature_path, embedding_dir,
+                             name_parser=None, desired_cell_type=None):
+    graph_dataset = StreamScoolDataset(
+        graph_dataset_path,
+        finer_scool_path,
+        chroms, 10000,
+        bedpe_dict, tad_dict,
+        name_parser, desired_cell_type,
+        pre_transform=T.Compose([
+            RemoveSelfLooping(),
+            ReadKmerFeatures(
+                kmer_feature_path, chroms, False,
+                os.path.join(trained_model_dir, f'{run_id}_kmer_scaler_calling.pkl')
+            ),
+            ReadMotifFeatures(
+                motif_feature_path, chroms, False,
+                os.path.join(trained_model_dir, f'{run_id}_motif_scaler_calling.pkl')
+            ),
+            PositionalEncoding()
+        ])
+    )
+    feature_caller = MultitaskFeatureCaller(
+        run_id, f'{trained_model_dir}/{run_id}.pt', graph_dataset.num_features,
+        hyperparams.alpha, hyperparams.beta
+    )
+    feature_caller.load_model()
+    feature_caller.generate_pooled_cell_embeddings(
+        graph_dataset, chroms, DEVICE, embedding_dir
     )
 
 
-
-def read_bedpe_as_df(bedpe_path):
+def read_bedpe_as_df(bedpe_path, add_chr_prefix=True):
     label_df = pd.read_csv(
         bedpe_path, header=None, index_col=False, sep='\t', dtype={0: 'str', 3: 'str'},
         names=['chrom1', 'x1', 'x2', 'chrom2', 'y1', 'y2']
     )
-    label_df['chrom1'], label_df['chrom2'] = 'chr' + label_df['chrom1'], 'chr' + label_df['chrom2']
+    if add_chr_prefix:
+        label_df['chrom1'], label_df['chrom2'] = 'chr' + label_df['chrom1'], 'chr' + label_df['chrom2']
     return label_df
 
 
@@ -181,24 +267,39 @@ def evaluate_average_cells(cell_pred_paths, bedpe_path, resolution, chrom_sizes_
     cell_pred_paths must be of the same cell type
     """
     label_df = read_bedpe_as_df(bedpe_path)
-    average_pred = get_average_preds(cell_pred_paths, bedpe_path, resolution, chrom_sizes_path, loop_num, threshold, percentile, sc_loop_threshold)
+    average_pred = get_average_preds(cell_pred_paths, resolution, chrom_sizes_path, loop_num, threshold, percentile,
+                                     sc_loop_threshold)
     candidate_df = average_pred.drop('proba', axis=1)
     # print(len(candidate_df))
     return slack_metrics_df(label_df, candidate_df, resolution) + (len(candidate_df),) + (average_pred,)
 
 
-def get_average_preds(cell_pred_paths, bedpe_path, resolution, chrom_sizes_path, loop_num=None, threshold=None, percentile=None, sc_loop_threshold=0.5):
+def get_average_preds(cell_pred_paths, resolution, chrom_sizes_path, loop_num=None, threshold=None, percentile=None,
+                      sc_loop_threshold=0.5):
     """
     Evaluate based on the average prediction of a cell type
     cell_pred_paths must be of the same cell type
     """
     pred_dfs = []
-    for pred_path in cell_pred_paths:
-        pred_df = pd.read_csv(pred_path, header=0, index_col=False, sep='\t')
-        pred_df = pred_df[pred_df['proba'] >= sc_loop_threshold].reset_index(drop=True)
-        pred_dfs.append(pred_df)
+    if h5py.is_hdf5(cell_pred_paths[0]):
+        total_cells_num = 0
+        for cell_pred_path in cell_pred_paths:
+            assert h5py.is_hdf5(cell_pred_path)
+            with h5py.File(cell_pred_path, 'r') as f:
+                cell_names = list(f.keys())
+                total_cells_num += len(cell_names)
+            for cell_name in cell_names:
+                pred_df = pd.read_hdf(cell_pred_path, cell_name)
+                pred_df = pred_df[pred_df['proba'] >= sc_loop_threshold].reset_index(drop=True)
+                pred_dfs.append(pred_df)
+    else:
+        total_cells_num = len(cell_pred_paths)
+        for pred_path in cell_pred_paths:
+            pred_df = pd.read_csv(pred_path, header=0, index_col=False, sep='\t')
+            pred_df = pred_df[pred_df['proba'] >= sc_loop_threshold].reset_index(drop=True)
+            pred_dfs.append(pred_df)
     time_start = time.time()
-    average_pred = get_raw_average_pred_dfs(pred_dfs, chrom_sizes_path, len(cell_pred_paths), resolution, sc_loop_threshold=sc_loop_threshold)
+    average_pred = get_raw_average_pred_dfs(pred_dfs, chrom_sizes_path, total_cells_num, resolution, sc_loop_threshold=sc_loop_threshold)
     print('Averaging operation time used:', time.time() - time_start)
     proba_mat = average_pred['proba'].to_numpy()[..., np.newaxis]
     average_pred['proba'] = minmax_scale(proba_mat[:, 0], feature_range=(0, 1))

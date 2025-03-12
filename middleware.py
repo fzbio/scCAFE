@@ -6,6 +6,51 @@ from multiscale_calling import MultitaskFeatureCaller
 from configs import DEVICE
 from configs import CompilationConfigs as cc
 import tempfile
+import h5py
+import torch
+
+
+class CellDataset(Dataset):
+    def __init__(self, h5file_path):
+        tmp_dir = tempfile.TemporaryDirectory()
+        super(CellDataset, self).__init__(root=tmp_dir.name)
+        self.h5file_path = h5file_path
+        with h5py.File(self.h5file_path, 'r') as f:
+            self.cell_names = list(f.keys())
+        tmp_dir.cleanup()
+
+    @property
+    def processed_file_names(self):
+        return []
+
+    def process(self):
+        pass
+
+    @torch.no_grad()
+    def _process_item(self, idx):
+        current_cell_name = self.cell_names[idx]
+        with h5py.File(self.h5file_path, 'r') as f:
+            x = f[current_cell_name]
+            data = Data(
+                x=torch.tensor(x, dtype=torch.float32).unsqueeze(0),
+                cell_name=current_cell_name
+            )
+        return data
+
+    def download(self):
+        pass
+
+    @property
+    def raw_file_names(self):
+        return []
+
+    def len(self):
+        with h5py.File(self.h5file_path, 'r') as f:
+            return len(f)
+
+    def get(self, idx):
+        data = self._process_item(idx)
+        return data
 
 
 class MiddleWareDataset(Dataset):
@@ -35,6 +80,7 @@ class MiddleWareDataset(Dataset):
         data = self.scool_dataset.get(idx)
         data = data.to(DEVICE)
         z = self.first_feature_caller.vgae.encode(data.x, data.edge_index)
+        # z = torch.relu(self.first_feature_caller.vgae.encode(data.x, data.edge_index))
 
         middle_data = Data(x=z, tad_label=data.tad_label, chrom_name=data.chrom_name, cell_name=data.cell_name)
         return middle_data

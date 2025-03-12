@@ -240,6 +240,7 @@ def parsebed(chiafile, res=10000, lower=0, upper=5000000, valid_threshold=1):
             if (b - a > lower) and (b - a < upper) and 'M' not in s[0]:
                 # always has prefix "chr", avoid potential bugs
                 chrom = 'chr' + re.compile('^chr').sub('', s[0])
+                # chrom = s[0]
                 coords[chrom].append((a, b))
     valid_coords = dict()
     for c in coords:

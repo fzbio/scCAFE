@@ -1,0 +1,35 @@
+{
+  "do_imputation": true,
+  "chrom_sizes_path": "external_annotations/hg19.sizes",
+  "n_fold": 10,
+  "train_chroms": [
+    "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14",
+    "chr16", "chr17", "chr18"
+  ],
+  "val_chroms": [
+    "chr19", "chr20", "chr21", "chr22"
+  ],
+  "chroms": [
+    "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14",
+    "chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22"
+  ],
+  "model_dir": "models",
+  "refined_data_dir": "refined_scools",
+  "graph_dir": "graph_data",
+  "finer_scool": "data/Neuron/Neuron_hg19_10kb_filtered.scool",
+  "tmp_root_dir": "tmp",
+  "kmer_feature_path": "data/graph_features/human/hg19.10kb.kmer.csv",
+  "motif_feature_path": "data/graph_features/human/CTCF_hg19.10kb.input.csv",
+  "bedpe_dict": {
+    "Neuron": "data/Neuron/Neuron.bedpe"
+  },
+  "tad_dict": {
+    "Neuron": "data/human_prefrontal_cortex/bulk/neuron_liftedHg19_10kb_directionality_2.5mb.bed"
+  },
+  "name_parser": null,
+  "desired_cell_types": null,
+  "epochs": 100,
+  "train_samples_per_epoch": 100,
+  "tad_samples_per_epoch": 100,
+  "dcn_batch_size": 1
+}

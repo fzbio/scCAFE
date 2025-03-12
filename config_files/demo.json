@@ -1,0 +1,19 @@
+{
+  "trained_model_id": "neuron_multitask2.5mb",
+  "model_dir": "models",
+  "chroms": ["chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14", "chr15", "chr16", "chr17", "chr18", "chr19"],
+  "chrom_sizes_path": "external_annotations/mm10.sizes",
+  "motif_feature_path": "data/graph_features/mouse/CTCF_mm10.10kb.input.csv",
+  "kmer_feature_path": "data/graph_features/mouse/mm10.10kb.kmer.csv",
+  "raw_finer_scool": "data/demo.scool",
+  "do_imputation": true,
+  "imputed_scool_dir": "refined_testset_scools",
+  "filter_region_path": "region_filter/mm10_filter_regions.txt",
+  "bedpe_dict": {
+    "ES": "data/placeholder"
+  },
+  "assembly_path": "data/graph_features/mouse/mm10.fa",
+  "save_to_hdf": true,
+  "clustering_plot_dir": "preds/clustering_plots",
+  "ref_tad_size": "data/mES_ref_tads.bed"
+}

@@ -1,0 +1,19 @@
+{
+  "trained_model_id": "tang_mES_multitask2.5mb",
+  "model_dir": "models",
+  "chroms": ["chr1", "chr2", "chr3", "chr4", "chr5", "chr6", "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14", "chr15", "chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22"],
+  "chrom_sizes_path": "external_annotations/hg38.chrom.sizes",
+  "motif_feature_path": "data/graph_features/human/CTCF_hg38.10kb.input.csv",
+  "kmer_feature_path": "data/graph_features/human/hg38.10kb.kmer.csv",
+  "raw_finer_scool": "data/GM12878_all/gm12878_all_tang_10kb.scool",
+  "do_imputation": true,
+  "imputed_scool_dir": "/mnt/d/research_projects/scCAFE_data/refined_testset_scools",
+  "filter_region_path": "region_filter/hg38_filter_regions.txt",
+  "bedpe_dict": {
+    "GM12878": "data/placeholder"
+  },
+  "assembly_path": "data/graph_features/human/hg38.fa",
+  "save_to_hdf": true,
+  "clustering_plot_dir": "preds/clustering_plots",
+  "ref_tad_size": 20
+}
