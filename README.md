@@ -1,6 +1,12 @@
 # scCAFE
 Source code for "Unveiling multi-scale architectural features in single-cell Hi-C data using scCAFE"
 
+
+[![biorxiv](https://img.shields.io/badge/bioRxiv-611762-AE353A)](https://www.biorxiv.org/content/10.1101/2024.09.10.611762v1)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15006290.svg)](https://doi.org/10.5281/zenodo.15006290)
+![Model](imgs/architecture.png)
+
+
 ## Installation
 
 
@@ -18,7 +24,7 @@ Source code for "Unveiling multi-scale architectural features in single-cell Hi-
     conda activate scCAFE
     ```
 
-3. **Download the `graph_features` folder from [scCAFE assets](), and copy it to the `data` directory.**
+3. **Download the `graph_features` folder from [scCAFE assets](https://drive.google.com/drive/folders/1F5umFORCXMKsUgO-cPcvcaNKu1ojF-rr?usp=drive_link), and copy it to the `data` directory.**
 
 4. Install PyTorch >= 2.0.1 according to its official [documentation](https://pytorch.org/get-started/previous-versions/). We recommend using [PyTorch 2.0.*](https://pytorch.org/get-started/previous-versions/#linux-and-windows-23) for best compatibility.
 
