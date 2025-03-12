@@ -10,3 +10,4 @@ scipy==1.10.1
 positional-encodings[pytorch]
 torchmetrics
 hmmlearn==0.3.0
+fanc==0.9.28
