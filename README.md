@@ -40,10 +40,6 @@ Source code for "Unveiling multi-scale architectural features in single-cell Hi-
 
 To use scCAFE to predict architectural features, the user only needs to provide a configuration file. The configuration file is a `.json` file that specifies the parameters for the prediction. Check out the example configuration files in `config_files`. Below is the descriptions of the fields in the configuration file:
 
-``` json
-{
-  "trained_model_id": "mES_multitask2.5mb",
-  "model_dir": "models" 
 
 The fields of the configuration file are as follows:
 
