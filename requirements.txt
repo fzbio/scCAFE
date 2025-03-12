@@ -1,0 +1,9 @@
+cooler==0.9.3
+cooltools==0.7.1
+h5py==3.9.0
+kcounter==0.1.1
+matplotlib==3.7.1
+pandas==2.0.3
+pyfastx==2.1.0
+scikit-learn==1.3.0
+scipy==1.10.1
