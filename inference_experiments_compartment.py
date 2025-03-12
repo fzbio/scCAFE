@@ -59,18 +59,20 @@ if __name__ == '__main__':
 
     cell_num = len(cooler.fileops.list_scool_cells(eic.raw_finer_scool))
 
-
     with tempfile.TemporaryDirectory(dir=tmp_root) as graph_dir, \
-            tempfile.TemporaryDirectory(dir=tmp_root) as subset_dir, \
-            tempfile.TemporaryDirectory(dir=tmp_root) as trainset_dir, tempfile.TemporaryDirectory(dir=tmp_root) as valset_dir:
-
-        if use_existing_data:
+            tempfile.TemporaryDirectory(dir=tmp_root) as subset_dir:
+        selected_raw_finer_scool_path = os.path.join(subset_dir, 'subset.scool')
+        random_select_subset_scools(eic.raw_finer_scool, selected_raw_finer_scool_path, cell_num, cell_selection_seed)
+        assert len(cooler.fileops.list_scool_cells(selected_raw_finer_scool_path)) == cell_num
+        if eic.do_imputation:
             imputed_finer_scool_path = os.path.join(eic.imputed_scool_dir, f'{pred_id}.scool')
+            if not use_existing_data:
+                remove_existing_scool(imputed_finer_scool_path)
+                assembly = get_chrom_sizes(chrom_sizes_path)
+                imputer = Imputer(3)
+                imputer.impute_dataset(selected_raw_finer_scool_path, imputed_finer_scool_path, chroms, assembly,
+                                       tmp_root)
         else:
-            selected_raw_finer_scool_path = os.path.join(subset_dir, 'subset.scool')
-            random_select_subset_scools(eic.raw_finer_scool, selected_raw_finer_scool_path, cell_num,
-                                        cell_selection_seed)
-            assert len(cooler.fileops.list_scool_cells(selected_raw_finer_scool_path)) == cell_num
             imputed_finer_scool_path = selected_raw_finer_scool_path
         assert len(cooler.fileops.list_scool_cells(imputed_finer_scool_path)) == cell_num
 

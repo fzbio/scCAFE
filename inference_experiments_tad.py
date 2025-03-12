@@ -75,7 +75,7 @@ if __name__ == '__main__':
             if not use_existing_data:
                 remove_existing_scool(imputed_finer_scool_path)
                 assembly = get_chrom_sizes(chrom_sizes_path)
-                imputer = Imputer(eic.k)
+                imputer = Imputer(3)
                 imputer.impute_dataset(selected_raw_finer_scool_path, imputed_finer_scool_path, chroms, assembly,
                                        tmp_root)
         else:
