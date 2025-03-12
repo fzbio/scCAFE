@@ -38,6 +38,8 @@ Source code for "Unveiling multi-scale architectural features in single-cell Hi-
     ```
     pip install -r requirements.txt
     ```
+   
+7. Install scHiCTools according to its official [documentation](https://github.com/liu-bioinfo-lab/scHiCTools). Note that the pip installation is broken, so please install it from the source.
 
 ---
 
