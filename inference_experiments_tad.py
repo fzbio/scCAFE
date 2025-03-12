@@ -55,7 +55,7 @@ if __name__ == '__main__':
     chrom_sizes_path = eic.chrom_sizes_path
     name_parser = None
     desired_cell_types = None
-    if eic.cluster_plot_dir is not None:
+    if eic.clustering_plot_dir is not None:
         os.makedirs(eic.clustering_plot_dir, exist_ok=True)
         plot_path = os.path.join(eic.clustering_plot_dir, f'{pred_id}.png')
     else:
