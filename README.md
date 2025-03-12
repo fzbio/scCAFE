@@ -206,6 +206,7 @@ optional arguments:
   -h, --help       show this help message and exit
 ```
 
+---
 
 ## Example
 
@@ -218,3 +219,8 @@ python inference_experiments_tad.py config_files/demo.json demo -d
 python inference_experiments_compartment.py config_files/demo.json demo -d
 ```
 After successful run, the results will be saved in the `preds` directory.
+
+
+## Marker loop anchor discovery
+
+scCAFE also provides the function to discover marker loop anchors. To use this function, please refer to the tutorial in this [notebook](https://colab.research.google.com/drive/1nJDo0ZN--c37173YKvUYJBUnrAOKkVwT?usp=sharing).
