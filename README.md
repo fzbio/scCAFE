@@ -38,6 +38,11 @@ Source code for "Unveiling multi-scale architectural features in single-cell Hi-
 
 ## Usage:
 
+
+scCAFE accepts `.scool` files as input. If this format sounds unfamiliar to you, kindly check out [Cooler](https://github.com/open2c/cooler)'s [documentation](https://cooler.readthedocs.io/en/latest/api.html#cooler.create_scool) for detailed descriptions. 
+
+An `.scool` file of 10-kb resolution is needed to run scCAFE. 
+
 To use scCAFE to predict architectural features, the user only needs to provide a configuration file. The configuration file is a `.json` file that specifies the parameters for the prediction. Check out the example configuration files in `config_files`. Below is the descriptions of the fields in the configuration file:
 
 
@@ -113,9 +118,6 @@ Fields in the configuration JSON file:
       
  ```
 
-scCAFE accepts `.scool` files as input. If this format sounds unfamiliar to you, kindly check out [Cooler](https://github.com/open2c/cooler)'s [documentation](https://cooler.readthedocs.io/en/latest/api.html#cooler.create_scool) for detailed descriptions. 
-
-An `.scool` file of 10-kb resolution is needed to run scCAFE. 
 
 
 ### Loop prediction
